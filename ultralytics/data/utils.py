@@ -32,7 +32,7 @@ from ultralytics.utils import (
 )
 from ultralytics.utils.checks import check_file, check_font, is_ascii
 from ultralytics.utils.downloads import download, safe_download, unzip_file
-from ultralytics.utils.ops import segments2boxes
+from ultralytics.utils.ops import segments2boxes, xywhr2xyxyxyxy
 
 HELP_URL = "See https://docs.ultralytics.com/datasets for dataset formatting guidance."
 IMG_FORMATS = {"bmp", "dng", "jpeg", "jpg", "mpo", "png", "tif", "tiff", "webp", "pfm", "heic"}  # image suffixes
@@ -123,6 +123,12 @@ def verify_image_label(args):
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
                     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+
+                # obb
+                if any(len(x) == 6 for x in lb) and (not keypoint):
+                    classes = np.array([x[0] for x in lb], dtype=np.float32)
+                    segments = xywhr2xyxyxyxy(np.array([x[1:] for x in lb], dtype=np.float32))
+                    lb = np.concatenate((classes.reshape(-1, 1), np.array([x[1:] for x in lb], dtype=np.float32)), 1)
                 lb = np.array(lb, dtype=np.float32)
             if nl := len(lb):
                 if keypoint:
@@ -137,8 +143,7 @@ def verify_image_label(args):
                 # All labels
                 max_cls = lb[:, 0].max()  # max label count
                 assert max_cls < num_cls, (
-                    f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. "
-                    f"Possible class labels are 0-{num_cls - 1}"
+                    f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. " f"Possible class labels are 0-{num_cls - 1}"
                 )
                 _, i = np.unique(lb, axis=0, return_index=True)
                 if len(i) < nl:  # duplicate row check
@@ -329,9 +334,7 @@ def check_det_dataset(dataset, autodownload=True):
     for k in "train", "val":
         if k not in data:
             if k != "val" or "validation" not in data:
-                raise SyntaxError(
-                    emojis(f"{dataset} '{k}:' key missing ❌.\n'train' and 'val' are required in all data YAMLs.")
-                )
+                raise SyntaxError(emojis(f"{dataset} '{k}:' key missing ❌.\n'train' and 'val' are required in all data YAMLs."))
             LOGGER.info("WARNING ⚠️ renaming data YAML 'validation' key to 'val' to match YOLO format.")
             data["val"] = data.pop("validation")  # replace 'validation' key with 'val' key
     if "names" not in data and "nc" not in data:
@@ -431,11 +434,7 @@ def check_cls_dataset(dataset, split=""):
         LOGGER.info(s)
     train_set = data_dir / "train"
     val_set = (
-        data_dir / "val"
-        if (data_dir / "val").exists()
-        else data_dir / "validation"
-        if (data_dir / "validation").exists()
-        else None
+        data_dir / "val" if (data_dir / "val").exists() else data_dir / "validation" if (data_dir / "validation").exists() else None
     )  # data/test or data/val
     test_set = data_dir / "test" if (data_dir / "test").exists() else None  # data/val or data/test
     if split == "val" and not val_set:
@@ -528,9 +527,7 @@ class HUBDatasetStats:
         if not str(path).endswith(".zip"):  # path is data.yaml
             return False, None, path
         unzip_dir = unzip_file(path, path=path.parent)
-        assert unzip_dir.is_dir(), (
-            f"Error unzipping {path}, {unzip_dir} not found. path/to/abc.zip MUST unzip to path/to/abc/"
-        )
+        assert unzip_dir.is_dir(), f"Error unzipping {path}, {unzip_dir} not found. path/to/abc.zip MUST unzip to path/to/abc/"
         return True, str(unzip_dir), find_dataset_yaml(unzip_dir)  # zipped, data_dir, yaml_path
 
     def _hub_ops(self, f):
