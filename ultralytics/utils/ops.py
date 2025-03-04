@@ -82,11 +82,7 @@ def segment2box(segment, width=640, height=640):
     inside = (x >= 0) & (y >= 0) & (x <= width) & (y <= height)
     x = x[inside]
     y = y[inside]
-    return (
-        np.array([x.min(), y.min(), x.max(), y.max()], dtype=segment.dtype)
-        if any(x)
-        else np.zeros(4, dtype=segment.dtype)
-    )  # xyxy
+    return np.array([x.min(), y.min(), x.max(), y.max()], dtype=segment.dtype) if any(x) else np.zeros(4, dtype=segment.dtype)  # xyxy
 
 
 def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, padding=True, xywh=False):
@@ -564,8 +560,23 @@ def xyxyxyxy2xywhr(x):
     for pts in points:
         # NOTE: Use cv2.minAreaRect to get accurate xywhr,
         # especially some objects are cut off by augmentations in dataloader.
-        (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
-        rboxes.append([cx, cy, w, h, angle / 180 * np.pi])
+        # (cx, cy), (w, h), angle = cv2.minAreaRect(pts)
+        # rboxes.append([cx, cy, w, h, angle / 180 * np.pi])
+
+        # NOTE: Use the following method to get xywhr, angle will be in range [-pi, pi]
+        # Calculate the center of the rectangle
+        cx, cy = np.mean(pts, axis=0)
+
+        # Calculate width and height of the rectangle
+        w = np.linalg.norm(pts[0] - pts[3])
+        h = np.linalg.norm(pts[0] - pts[1])
+
+        # Calculate the angle based on the location of the first point
+        dx, dy = pts[0] - pts[3]
+        angle = np.arctan2(dy, dx)
+
+        rboxes.append([cx, cy, w, h, angle])
+
     return torch.tensor(rboxes, device=x.device, dtype=x.dtype) if is_torch else np.asarray(rboxes)
 
 
@@ -581,9 +592,7 @@ def xywhr2xyxyxyxy(x):
         (numpy.ndarray | torch.Tensor): Converted corner points of shape (n, 4, 2) or (b, n, 4, 2).
     """
     cos, sin, cat, stack = (
-        (torch.cos, torch.sin, torch.cat, torch.stack)
-        if isinstance(x, torch.Tensor)
-        else (np.cos, np.sin, np.concatenate, np.stack)
+        (torch.cos, torch.sin, torch.cat, torch.stack) if isinstance(x, torch.Tensor) else (np.cos, np.sin, np.concatenate, np.stack)
     )
 
     ctr = x[..., :2]
@@ -651,9 +660,7 @@ def resample_segments(segments, n=1000):
         x = np.linspace(0, len(s) - 1, n - len(s) if len(s) < n else n)
         xp = np.arange(len(s))
         x = np.insert(x, np.searchsorted(x, xp), xp) if len(s) < n else x
-        segments[i] = (
-            np.concatenate([np.interp(x, xp, s[:, i]) for i in range(2)], dtype=np.float32).reshape(2, -1).T
-        )  # segment xy
+        segments[i] = np.concatenate([np.interp(x, xp, s[:, i]) for i in range(2)], dtype=np.float32).reshape(2, -1).T  # segment xy
     return segments
 
 
@@ -825,11 +832,7 @@ def masks2segments(masks, strategy="all"):
         c = cv2.findContours(x, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
         if c:
             if strategy == "all":  # merge and concatenate all segments
-                c = (
-                    np.concatenate(merge_multi_segment([x.reshape(-1, 2) for x in c]))
-                    if len(c) > 1
-                    else c[0].reshape(-1, 2)
-                )
+                c = np.concatenate(merge_multi_segment([x.reshape(-1, 2) for x in c])) if len(c) > 1 else c[0].reshape(-1, 2)
             elif strategy == "largest":  # select largest segment
                 c = np.array(c[np.array([len(x) for x in c]).argmax()]).reshape(-1, 2)
         else:
@@ -866,6 +869,4 @@ def clean_str(s):
 
 def empty_like(x):
     """Creates empty torch.Tensor or np.ndarray with same shape as input and float32 dtype."""
-    return (
-        torch.empty_like(x, dtype=torch.float32) if isinstance(x, torch.Tensor) else np.empty_like(x, dtype=np.float32)
-    )
+    return torch.empty_like(x, dtype=torch.float32) if isinstance(x, torch.Tensor) else np.empty_like(x, dtype=np.float32)
